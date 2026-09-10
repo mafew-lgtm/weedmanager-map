@@ -93,12 +93,17 @@
                 });
         });
 
-        // Generate species heatmaps once all files have loaded
+        // Generate species heatmaps with ~200m scaled radius once all files have loaded
         Promise.all(fetchPromises).then(function() {
             Object.keys(speciesPoints).forEach(function(species) {
                 var pts = speciesPoints[species];
                 if (pts.length > 0) {
-                    var heatLayer = L.heatLayer(pts, { radius: 20, blur: 15, maxZoom: 17 });
+                    var heatLayer = L.heatLayer(pts, { 
+                        radius: 165,        // Scales to ~200m geographic radius at zoom 17
+                        blur: 35,           // Smooth gradient edge
+                        maxZoom: 17,        // Max zoom reference level
+                        minOpacity: 0.25
+                    });
                     layerControl.addOverlay(heatLayer, "Heatmap: " + species);
                 }
             });
