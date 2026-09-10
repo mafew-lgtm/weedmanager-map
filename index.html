@@ -19,10 +19,10 @@
     </style>
 </head>
 <body>
-    <div class="map-title">WeedManager - Unified Projects Map (200m Buffer)</div>
+    <div class="map-title">WeedManager - Unified Projects Map</div>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([-35.91740577144669, 174.08673007902715], 12);
+        var map = L.map('map').setView([-35.0149322397, 173.467512], 12);
         var carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
         var esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' });
         
@@ -36,22 +36,20 @@
 
         var layerControl = L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
 
+        // Dynamic async fetch per layer
         var fetchPromises = layersToFetch.map(function(cfg) {
             return fetch(cfg.file)
                 .then(function(res) { return res.json(); })
                 .then(function(geoJson) {
                     var layer = L.geoJson(geoJson, {
                         style: function(feature) {
-                            return { 
-                                color: cfg.color, 
-                                weight: 2, 
-                                opacity: 0.8, 
-                                fillColor: cfg.color, 
-                                fillOpacity: 0.35 
-                            };
+                            return { color: cfg.color, weight: 3, opacity: 0.8, fillColor: cfg.color, fillOpacity: 0.35 };
+                        },
+                        pointToLayer: function(feature, latlng) {
+                            return L.circleMarker(latlng, { radius: 6, fillColor: cfg.color, color: "#000", weight: 1, opacity: 1, fillOpacity: 0.8 });
                         },
                         onEachFeature: function(feature, layer) {
-                            var popupContent = '<div style="max-height: 200px; overflow-y: auto;"><b>' + cfg.title + ' (200m Buffer)</b><hr>';
+                            var popupContent = '<div style="max-height: 200px; overflow-y: auto;"><b>' + cfg.title + '</b><hr>';
                             if (feature.properties) {
                                 for (var key in feature.properties) {
                                     popupContent += '<b>' + key + ':</b> ' + feature.properties[key] + '<br>';
@@ -62,19 +60,16 @@
                         }
                     }).addTo(map);
 
-                    layerControl.addOverlay(layer, cfg.title + " (200m Buffer)");
+                    layerControl.addOverlay(layer, cfg.title);
 
-                    // Extract coordinates for species heatmaps
+                    // Collect heatmaps for weed features
                     if (cfg.isWeed && geoJson.features) {
                         geoJson.features.forEach(function(feature) {
                             if (!feature.properties) return;
-                            
-                            // Check common property names used by Weedmanager
                             var species = feature.properties.species || 
                                           feature.properties.species_name || 
                                           feature.properties.weed_type || 
                                           feature.properties.name || 
-                                          feature.properties.weed || 
                                           "Unspecified Species";
                             
                             if (!speciesPoints[species]) speciesPoints[species] = [];
@@ -98,17 +93,12 @@
                 });
         });
 
-        // Generate species heatmap overlays dynamically
+        // Generate species heatmaps once all files have loaded
         Promise.all(fetchPromises).then(function() {
             Object.keys(speciesPoints).forEach(function(species) {
                 var pts = speciesPoints[species];
                 if (pts.length > 0) {
-                    var heatLayer = L.heatLayer(pts, { 
-                        radius: 25, 
-                        blur: 15, 
-                        maxZoom: 17,
-                        minOpacity: 0.3
-                    });
+                    var heatLayer = L.heatLayer(pts, { radius: 20, blur: 15, maxZoom: 17 });
                     layerControl.addOverlay(heatLayer, "Heatmap: " + species);
                 }
             });
