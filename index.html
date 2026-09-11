@@ -4,7 +4,7 @@
     <title>WeedManager NZ Dashboard</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
@@ -12,7 +12,7 @@
 
     <style>
         html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
-        
+
         .leaflet-custom-control {
             background: rgba(255, 255, 255, 0.95);
             padding: 12px 14px;
@@ -102,7 +102,7 @@
         });
     }
 
-    // Create a individual Leaflet HeatLayer per species
+    // Create an individual Leaflet HeatLayer per species (not yet added to map)
     const speciesHeatmaps = {};
     Object.keys(heatPointsBySpecies).forEach(spName => {
         const baseColor = speciesColors[spName] || '#e74c3c';
@@ -112,23 +112,25 @@
             minOpacity: 0.35,
             maxZoom: 15,
             gradient: { 0.2: '#0000ff', 0.6: baseColor, 1.0: '#ff0000' }
-        }).addTo(map);
+        });
     });
 
-    // Function to filter heatmaps based on species selector dropdown
+    // Species dropdown is the single source of truth for which heatmap(s) show.
+    // (Per-species heatmaps are intentionally NOT registered in L.control.layers
+    // below, so the checkbox list and the dropdown can never fight over the
+    // same layer's visibility.)
     function updateHeatmaps() {
         const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
 
         Object.keys(speciesHeatmaps).forEach(spName => {
             const layer = speciesHeatmaps[spName];
-            if (sel === 'ALL' || sel === spName) {
-                if (!map.hasLayer(layer)) {
-                    map.addLayer(layer);
-                }
-            } else {
-                if (map.hasLayer(layer)) {
-                    map.removeLayer(layer);
-                }
+            const shouldShow = (sel === 'ALL' || sel === spName);
+            const isShown = map.hasLayer(layer);
+
+            if (shouldShow && !isShown) {
+                map.addLayer(layer);
+            } else if (!shouldShow && isShown) {
+                map.removeLayer(layer);
             }
         });
     }
@@ -170,7 +172,7 @@
     legendControl.onAdd = function() {
         const div = L.DomUtil.create('div', 'leaflet-custom-control');
         let html = '<b>Species Filter</b><br/><select id="spSelect" onchange="updateMap()"><option value="ALL">-- All Species --</option>';
-        
+
         Object.keys(speciesColors).sort().forEach(sp => {
             html += `<option value="${sp}">${sp}</option>`;
         });
@@ -189,6 +191,11 @@
     legendControl.addTo(map);
 
     // BUILD LAYER OVERLAYS DICTIONARY
+    // NOTE: per-species heatmaps are deliberately excluded here — they're
+    // controlled exclusively by the species dropdown above to avoid the two
+    // controls overriding each other. If you want independent per-species
+    // checkboxes instead of (or as well as) the dropdown, that needs a bit
+    // more state-tracking logic — say the word and I'll add it.
     const overlayLayers = {
         "200m Buffers": bufferGroup,
         "Points": pointLayer,
@@ -197,11 +204,6 @@
         "Work Areas": workLayer
     };
 
-    // Add each individual species heatmap layer to the top-right Layer Control
-    Object.keys(speciesHeatmaps).sort().forEach(spName => {
-        overlayLayers[`Heatmap: ${spName}`] = speciesHeatmaps[spName];
-    });
-
     // DOCK LAYER TOGGLE CONTROL TO TOP-RIGHT
     L.control.layers(
         { "Satellite Imagery": esriSat, "OpenStreetMap": osmBase },
@@ -209,7 +211,7 @@
         { collapsed: true, position: 'topright' }
     ).addTo(map);
 
-    // Initial draw
+    // Initial draw (shows ALL species heatmaps by default)
     updateMap();
 
     // Auto-fit geometry bounds or default to New Zealand region
