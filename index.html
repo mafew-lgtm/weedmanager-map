@@ -8,12 +8,11 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 
     <style>
         html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
         
-        /* Custom UI Legend Container docked inside Leaflet Control Framework */
         .leaflet-custom-control {
             background: rgba(255, 255, 255, 0.95);
             padding: 12px 14px;
@@ -68,11 +67,11 @@
         pointToLayer: (f, latlng) => {
             const name = f.properties.species || f.properties.name || 'Unspecified';
             return L.circleMarker(latlng, {
-                radius: 6,
+                radius: 5,
                 fillColor: speciesColors[name] || '#ffffff',
                 color: '#ffffff',
                 weight: 1,
-                fillOpacity: 0.9
+                fillOpacity: 0.8
             });
         },
         onEachFeature: (f, l) => l.bindPopup(`<b>Species:</b> ${f.properties.species || f.properties.name || 'N/A'}`)
@@ -84,33 +83,43 @@
 
     const bufferGroup = L.layerGroup().addTo(map);
     const heatmapGroup = L.layerGroup().addTo(map);
+    let heatLayerInstance = null;
 
     // Dynamic Heatmap Layer Generation
     function updateHeatmap() {
-        heatmapGroup.clearLayers();
         const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
-        
-        if (!geoData.points || !geoData.points.features.length) return;
-
         const heatPoints = [];
-        geoData.points.features.forEach(f => {
-            if (!f.geometry || f.geometry.type !== 'Point') return;
-            const spName = f.properties.species || f.properties.name || 'Unspecified';
-            if (sel !== 'ALL' && spName !== sel) return;
 
-            const coords = f.geometry.coordinates;
-            // Leaflet heat expects [latitude, longitude, intensity]
-            heatPoints.push([coords[1], coords[0], 1.0]);
-        });
+        if (geoData.points && geoData.points.features) {
+            geoData.points.features.forEach(f => {
+                if (!f.geometry || f.geometry.type !== 'Point' || !f.geometry.coordinates) return;
+                const spName = f.properties.species || f.properties.name || 'Unspecified';
+                if (sel !== 'ALL' && spName !== sel) return;
+
+                const coords = f.geometry.coordinates;
+                const lng = Number(coords[0]);
+                const lat = Number(coords[1]);
+
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    // Leaflet heat requires [lat, lng, intensity]
+                    heatPoints.push([lat, lng, 1.0]);
+                }
+            });
+        }
+
+        if (heatLayerInstance) {
+            heatmapGroup.removeLayer(heatLayerInstance);
+            heatLayerInstance = null;
+        }
 
         if (heatPoints.length > 0) {
-            const heatLayer = L.heatLayer(heatPoints, {
+            heatLayerInstance = L.heatLayer(heatPoints, {
                 radius: 25,
                 blur: 15,
-                maxZoom: 16,
-                gradient: { 0.4: 'blue', 0.65: 'lime', 1.0: 'red' }
+                minOpacity: 0.35,
+                maxZoom: 15
             });
-            heatmapGroup.addLayer(heatLayer);
+            heatmapGroup.addLayer(heatLayerInstance);
         }
     }
 
