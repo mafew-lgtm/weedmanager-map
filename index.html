@@ -82,45 +82,55 @@
     const workLayer = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', dashArray: '4', fillOpacity: 0.1 } }).addTo(map);
 
     const bufferGroup = L.layerGroup().addTo(map);
-    const heatmapGroup = L.layerGroup().addTo(map);
-    let heatLayerInstance = null;
 
-    // Dynamic Heatmap Layer Generation
-    function updateHeatmap() {
-        const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
-        const heatPoints = [];
+    // Group point coordinates separately by species name
+    const heatPointsBySpecies = {};
+    if (geoData.points && geoData.points.features) {
+        geoData.points.features.forEach(f => {
+            if (!f.geometry || f.geometry.type !== 'Point' || !f.geometry.coordinates) return;
+            const spName = f.properties.species || f.properties.name || 'Unspecified';
+            const coords = f.geometry.coordinates;
+            const lng = Number(coords[0]);
+            const lat = Number(coords[1]);
 
-        if (geoData.points && geoData.points.features) {
-            geoData.points.features.forEach(f => {
-                if (!f.geometry || f.geometry.type !== 'Point' || !f.geometry.coordinates) return;
-                const spName = f.properties.species || f.properties.name || 'Unspecified';
-                if (sel !== 'ALL' && spName !== sel) return;
-
-                const coords = f.geometry.coordinates;
-                const lng = Number(coords[0]);
-                const lat = Number(coords[1]);
-
-                if (!isNaN(lat) && !isNaN(lng)) {
-                    // Leaflet heat requires [lat, lng, intensity]
-                    heatPoints.push([lat, lng, 1.0]);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                if (!heatPointsBySpecies[spName]) {
+                    heatPointsBySpecies[spName] = [];
                 }
-            });
-        }
+                heatPointsBySpecies[spName].push([lat, lng, 1.0]);
+            }
+        });
+    }
 
-        if (heatLayerInstance) {
-            heatmapGroup.removeLayer(heatLayerInstance);
-            heatLayerInstance = null;
-        }
+    // Create a individual Leaflet HeatLayer per species
+    const speciesHeatmaps = {};
+    Object.keys(heatPointsBySpecies).forEach(spName => {
+        const baseColor = speciesColors[spName] || '#e74c3c';
+        speciesHeatmaps[spName] = L.heatLayer(heatPointsBySpecies[spName], {
+            radius: 25,
+            blur: 15,
+            minOpacity: 0.35,
+            maxZoom: 15,
+            gradient: { 0.2: '#0000ff', 0.6: baseColor, 1.0: '#ff0000' }
+        }).addTo(map);
+    });
 
-        if (heatPoints.length > 0) {
-            heatLayerInstance = L.heatLayer(heatPoints, {
-                radius: 25,
-                blur: 15,
-                minOpacity: 0.35,
-                maxZoom: 15
-            });
-            heatmapGroup.addLayer(heatLayerInstance);
-        }
+    // Function to filter heatmaps based on species selector dropdown
+    function updateHeatmaps() {
+        const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
+
+        Object.keys(speciesHeatmaps).forEach(spName => {
+            const layer = speciesHeatmaps[spName];
+            if (sel === 'ALL' || sel === spName) {
+                if (!map.hasLayer(layer)) {
+                    map.addLayer(layer);
+                }
+            } else {
+                if (map.hasLayer(layer)) {
+                    map.removeLayer(layer);
+                }
+            }
+        });
     }
 
     function updateBuffers() {
@@ -152,7 +162,7 @@
 
     function updateMap() {
         updateBuffers();
-        updateHeatmap();
+        updateHeatmaps();
     }
 
     // DOCK LEGEND PANEL TO BOTTOM-LEFT
@@ -178,10 +188,24 @@
     };
     legendControl.addTo(map);
 
+    // BUILD LAYER OVERLAYS DICTIONARY
+    const overlayLayers = {
+        "200m Buffers": bufferGroup,
+        "Points": pointLayer,
+        "Lines": lineLayer,
+        "Polygons": polyLayer,
+        "Work Areas": workLayer
+    };
+
+    // Add each individual species heatmap layer to the top-right Layer Control
+    Object.keys(speciesHeatmaps).sort().forEach(spName => {
+        overlayLayers[`Heatmap: ${spName}`] = speciesHeatmaps[spName];
+    });
+
     // DOCK LAYER TOGGLE CONTROL TO TOP-RIGHT
     L.control.layers(
         { "Satellite Imagery": esriSat, "OpenStreetMap": osmBase },
-        { "Species Heatmap": heatmapGroup, "200m Buffers": bufferGroup, "Points": pointLayer, "Lines": lineLayer, "Polygons": polyLayer, "Work Areas": workLayer },
+        overlayLayers,
         { collapsed: true, position: 'topright' }
     ).addTo(map);
 
