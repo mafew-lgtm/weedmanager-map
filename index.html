@@ -8,11 +8,11 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
     <style>
         html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
         
-        /* Custom UI Legend Container docked inside Leaflet Control Framework */
         .leaflet-custom-control {
             background: rgba(255, 255, 255, 0.95);
             padding: 12px 14px;
@@ -50,24 +50,35 @@
     // Color assignment for Species
     const PALETTE = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6'];
     const speciesColors = {};
+    const speciesPointsMap = {}; // Store species -> [[lat, lng], ...]
     let idx = 0;
 
     if (geoData.points && geoData.points.features) {
         geoData.points.features.forEach(f => {
+            if (!f.geometry || f.geometry.type !== 'Point') return;
             const name = f.properties.species || f.properties.name || 'Unspecified';
+            
             if (!speciesColors[name]) {
                 speciesColors[name] = PALETTE[idx % PALETTE.length];
                 idx++;
             }
+            
+            if (!speciesPointsMap[name]) {
+                speciesPointsMap[name] = [];
+            }
+            
+            // Leaflet Heatmap requires [lat, lng, intensity]
+            const coords = f.geometry.coordinates;
+            speciesPointsMap[name].push([coords[1], coords[0], 1.0]);
         });
     }
 
-    // Vector Layers
+    // Vector Base Layers
     const pointLayer = L.geoJSON(geoData.points, {
         pointToLayer: (f, latlng) => {
             const name = f.properties.species || f.properties.name || 'Unspecified';
             return L.circleMarker(latlng, {
-                radius: 6,
+                radius: 5,
                 fillColor: speciesColors[name] || '#ffffff',
                 color: '#ffffff',
                 weight: 1,
@@ -81,40 +92,64 @@
     const polyLayer = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillOpacity: 0.3 } }).addTo(map);
     const workLayer = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', dashArray: '4', fillOpacity: 0.1 } }).addTo(map);
 
+    // Grouping Containers for Dynamic Filters
     const bufferGroup = L.layerGroup().addTo(map);
+    const heatmapGroup = L.layerGroup().addTo(map);
 
-    function updateBuffers() {
+    // Update Heatmaps and 200m Heatmap Buffers dynamically
+    function updateSpeciesLayers() {
         bufferGroup.clearLayers();
+        heatmapGroup.clearLayers();
+        
         const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
-
         if (!geoData.points || !geoData.points.features.length) return;
 
+        let activeHeatPoints = [];
+
+        // 1. Gather Points and Generate 200m Buffers
         geoData.points.features.forEach(f => {
             if (!f.geometry || f.geometry.type !== 'Point') return;
             const spName = f.properties.species || f.properties.name || 'Unspecified';
+            
             if (sel !== 'ALL' && spName !== sel) return;
 
+            // Store Lat/Lng for Heatmap
+            const coords = f.geometry.coordinates;
+            activeHeatPoints.push([coords[1], coords[0], 0.8]);
+
+            // Draw 200m Buffer around species locations
             try {
                 const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
                 L.geoJSON(buffered, {
                     style: {
                         color: speciesColors[spName] || '#f1c40f',
-                        weight: 1,
+                        weight: 1.5,
                         fillColor: speciesColors[spName] || '#f1c40f',
-                        fillOpacity: 0.25
+                        fillOpacity: 0.2
                     }
                 }).addTo(bufferGroup);
             } catch(e) {
-                console.warn('Buffer calculation failed for feature', e);
+                console.warn('Buffer calculation error:', e);
             }
         });
+
+        // 2. Render Heatmap Layer for filtered selection
+        if (activeHeatPoints.length > 0) {
+            const heatLayer = L.heatLayer(activeHeatPoints, {
+                radius: 25,
+                blur: 15,
+                maxZoom: 17,
+                gradient: { 0.4: 'blue', 0.65: 'lime', 1.0: 'red' }
+            });
+            heatmapGroup.addLayer(heatLayer);
+        }
     }
 
-    // DOCK LEGEND PANEL TO BOTTOM-LEFT
+    // DOCK LEGEND & CONTROL PANEL TO BOTTOM-LEFT
     const legendControl = L.control({ position: 'bottomleft' });
     legendControl.onAdd = function() {
         const div = L.DomUtil.create('div', 'leaflet-custom-control');
-        let html = '<b>Species Filter</b><br/><select id="spSelect" onchange="updateBuffers()"><option value="ALL">-- All Species --</option>';
+        let html = '<b>Species Filter</b><br/><select id="spSelect" onchange="updateSpeciesLayers()"><option value="ALL">-- All Species --</option>';
         
         Object.keys(speciesColors).sort().forEach(sp => {
             html += `<option value="${sp}">${sp}</option>`;
@@ -136,14 +171,21 @@
     // DOCK LAYER TOGGLE CONTROL TO TOP-RIGHT
     L.control.layers(
         { "Satellite Imagery": esriSat, "OpenStreetMap": osmBase },
-        { "200m Buffers": bufferGroup, "Points": pointLayer, "Lines": lineLayer, "Polygons": polyLayer, "Work Areas": workLayer },
+        { 
+            "Species Heatmap": heatmapGroup,
+            "200m Heatmap Buffers": bufferGroup, 
+            "Points": pointLayer, 
+            "Lines": lineLayer, 
+            "Polygons": polyLayer, 
+            "Work Areas": workLayer 
+        },
         { collapsed: true, position: 'topright' }
     ).addTo(map);
 
-    // Initial buffer draw
-    updateBuffers();
+    // Initial render
+    updateSpeciesLayers();
 
-    // Auto-fit geometry bounds or default to New Zealand region
+    // Auto-fit geometry bounds
     const allBounds = L.featureGroup([pointLayer, lineLayer, polyLayer, workLayer]).getBounds();
     if (allBounds.isValid()) {
         map.fitBounds(allBounds, { padding: [20, 20] });
