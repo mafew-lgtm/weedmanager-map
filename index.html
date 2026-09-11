@@ -9,24 +9,26 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- Turf.js for 200m buffer calculation -->
+    <!-- Turf.js for 200m geodesic buffer calculation -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
     <style>
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         #map { width: 100vw; height: 100vh; }
+        
+        /* Position control panel in top-left to avoid blocking right-hand layer box */
         .control-panel {
-            position: absolute; top: 12px; right: 12px; z-index: 1000;
+            position: absolute; top: 12px; left: 50px; z-index: 1000;
             background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25); font-size: 14px; max-width: 280px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 13px; max-width: 260px;
         }
         select { margin-top: 6px; width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
         .legend {
-            margin-top: 10px; font-size: 12px; line-height: 20px; color: #333; max-height: 200px; overflow-y: auto;
+            margin-top: 10px; font-size: 12px; line-height: 18px; color: #333; max-height: 160px; overflow-y: auto;
         }
         .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
         .color-badge {
-            width: 14px; height: 14px; margin-right: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+            width: 12px; height: 12px; margin-right: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
         }
     </style>
 </head>
@@ -49,13 +51,12 @@
 <script>
     const geoData = {"points": {"type": "FeatureCollection", "features": []}, "lines": {"type": "FeatureCollection", "features": []}, "polygons": {"type": "FeatureCollection", "features": []}, "work_areas": {"type": "FeatureCollection", "features": []}};
 
-    // Color Palette generator for species
+    // Color Palette generator
     const COLOR_PALETTE = [
         '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c',
         '#3498db', '#9b59b6', '#fd79a8', '#00cec9', '#6c5ce7'
     ];
 
-    // Assign consistent color to each unique species
     const speciesColorMap = {};
     let colorIndex = 0;
 
@@ -67,23 +68,22 @@
         }
     });
 
-    // Basemaps Setup
+    // Tile Basemaps
+    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri &mdash; WeedManager NZ'
+    });
+
     const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors | WeedManager NZ'
     });
 
-    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community | WeedManager NZ'
-    });
-
-    // Initialize Map with Satellite as default
     const map = L.map('map', {
         center: [-41.2865, 174.7762],
         zoom: 6,
         layers: [esriSatellite]
     });
 
-    // Vector Layers
+    // Create and automatically display vector layers on the map
     const layerPoints = L.geoJSON(geoData.points, {
         pointToLayer: (feature, latlng) => {
             const sp = feature.properties.species || feature.properties.name || 'Unknown';
@@ -101,36 +101,36 @@
             `<b>Species:</b> ${f.properties.species || f.properties.name || 'Unknown'}<br/>` +
             `<b>Notes:</b> ${f.properties.notes || 'N/A'}`
         )
-    });
+    }).addTo(map);
 
-    const layerLines = L.geoJSON(geoData.lines, { style: { color: '#f39c12', weight: 3 } });
-    const layerPolygons = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.4 } });
-    const layerWorkAreas = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', weight: 2, dashArray: '4', fillOpacity: 0.15 } });
+    const layerLines = L.geoJSON(geoData.lines, { style: { color: '#f39c12', weight: 3 } }).addTo(map);
+    const layerPolygons = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.4 } }).addTo(map);
+    const layerWorkAreas = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', weight: 2, dashArray: '4', fillOpacity: 0.15 } }).addTo(map);
 
-    // Populate Species Filter & Legend UI
+    // Populate Species Selection Dropdown & Dynamic Legend
     const select = document.getElementById('speciesFilter');
     const legendContent = document.getElementById('legendContent');
 
     Object.keys(speciesColorMap).sort().forEach(sp => {
-        // Filter dropdown
         const opt = document.createElement('option');
         opt.value = sp;
         opt.textContent = sp;
         select.appendChild(opt);
 
-        // Dynamic legend row
         const item = document.createElement('div');
         item.className = 'legend-item';
         item.innerHTML = `<span class="color-badge" style="background: ${speciesColorMap[sp]};"></span>${sp}`;
         legendContent.appendChild(item);
     });
 
-    // Container Layer for 200m Buffers
+    // Buffer Layer Group
     const bufferLayerGroup = L.layerGroup().addTo(map);
 
     function updateBufferHeatmap() {
         bufferLayerGroup.clearLayers();
         const selected = document.getElementById('speciesFilter').value;
+
+        if (!geoData.points || !geoData.points.features) return;
 
         const filteredFeatures = geoData.points.features.filter(f => {
             if (!f.geometry || f.geometry.type !== "Point") return false;
@@ -140,29 +140,32 @@
 
         if (filteredFeatures.length === 0) return;
 
-        // Create 200m buffered polygons per species color
         filteredFeatures.forEach(f => {
-            const sp = f.properties.species || f.properties.name || 'Unknown';
-            const color = speciesColorMap[sp] || '#f1c40f';
-            const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
+            try {
+                const sp = f.properties.species || f.properties.name || 'Unknown';
+                const color = speciesColorMap[sp] || '#f1c40f';
+                const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
 
-            const bufGeoJSON = L.geoJSON(buffered, {
-                style: {
-                    color: color,
-                    weight: 1,
-                    fillColor: color,
-                    fillOpacity: 0.25
-                },
-                onEachFeature: (feature, layer) => layer.bindPopup(`<b>Species:</b> ${sp}<br/><b>Zone:</b> 200m Risk Buffer`)
-            });
+                const bufGeoJSON = L.geoJSON(buffered, {
+                    style: {
+                        color: color,
+                        weight: 1,
+                        fillColor: color,
+                        fillOpacity: 0.25
+                    },
+                    onEachFeature: (feature, layer) => layer.bindPopup(`<b>Species:</b> ${sp}<br/><b>Zone:</b> 200m Risk Buffer`)
+                });
 
-            bufferLayerGroup.addLayer(bufGeoJSON);
+                bufferLayerGroup.addLayer(bufGeoJSON);
+            } catch (err) {
+                console.warn("Could not buffer point feature:", f, err);
+            }
         });
     }
 
     updateBufferHeatmap();
 
-    // Map Controls Setup
+    // Map Layer Toggle Controls (Collapsed by default in top-right)
     const baseMaps = {
         "Satellite Imagery": esriSatellite,
         "OpenStreetMap": osmBase
@@ -176,10 +179,12 @@
         "Work Areas": layerWorkAreas
     };
 
-    L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
+    L.control.layers(baseMaps, overlayMaps, { collapsed: true, position: 'topright' }).addTo(map);
 
-    if (geoData.points.features.length > 0) {
-        map.fitBounds(layerPoints.getBounds());
+    // Auto-zoom map bounds to fit data
+    const featureBoundsGroup = L.featureGroup([layerPoints, layerLines, layerPolygons, layerWorkAreas]);
+    if (featureBoundsGroup.getBounds().isValid()) {
+        map.fitBounds(featureBoundsGroup.getBounds(), { padding: [30, 30] });
     }
 </script>
 </body>
