@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- Turf.js for real geospatial 200m buffer calculations -->
+    <!-- Turf.js for 200m buffer calculation -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
     <style>
@@ -18,30 +18,29 @@
         .control-panel {
             position: absolute; top: 12px; right: 12px; z-index: 1000;
             background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25); font-size: 14px; max-width: 280px;
         }
         select { margin-top: 6px; width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
         .legend {
-            margin-top: 10px; font-size: 12px; line-height: 18px; color: #555;
+            margin-top: 10px; font-size: 12px; line-height: 20px; color: #333; max-height: 200px; overflow-y: auto;
         }
-        .legend span {
-            display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: middle; border-radius: 50%;
+        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+        .color-badge {
+            width: 14px; height: 14px; margin-right: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
         }
     </style>
 </head>
 <body>
 
 <div class="control-panel">
-    <label for="speciesFilter"><b>200m Buffer Species Filter:</b></label><br/>
+    <label for="speciesFilter"><b>Species Filter:</b></label><br/>
     <select id="speciesFilter" onchange="updateBufferHeatmap()">
         <option value="ALL">-- All Species --</option>
     </select>
 
     <div class="legend">
-        <b>Density Heatmap (200m Radius)</b><br/>
-        <span style="background: #e74c3c; opacity: 0.6;"></span> High Overlap<br/>
-        <span style="background: #f39c12; opacity: 0.5;"></span> Medium Overlap<br/>
-        <span style="background: #f1c40f; opacity: 0.35;"></span> 200m Buffer Zone
+        <b>Species 200m Buffer Key</b>
+        <div id="legendContent"></div>
     </div>
 </div>
 
@@ -49,87 +48,135 @@
 
 <script>
     const geoData = {"points": {"type": "FeatureCollection", "features": []}, "lines": {"type": "FeatureCollection", "features": []}, "polygons": {"type": "FeatureCollection", "features": []}, "work_areas": {"type": "FeatureCollection", "features": []}};
-    const map = L.map('map').setView([-41.2865, 174.7762], 6);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Color Palette generator for species
+    const COLOR_PALETTE = [
+        '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c',
+        '#3498db', '#9b59b6', '#fd79a8', '#00cec9', '#6c5ce7'
+    ];
+
+    // Assign consistent color to each unique species
+    const speciesColorMap = {};
+    let colorIndex = 0;
+
+    geoData.points.features.forEach(f => {
+        const sp = f.properties.species || f.properties.name || 'Unknown';
+        if (!speciesColorMap[sp]) {
+            speciesColorMap[sp] = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
+            colorIndex++;
+        }
+    });
+
+    // Basemaps Setup
+    const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors | WeedManager NZ'
-    }).addTo(map);
+    });
 
-    // Geometry Layers
+    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community | WeedManager NZ'
+    });
+
+    // Initialize Map with Satellite as default
+    const map = L.map('map', {
+        center: [-41.2865, 174.7762],
+        zoom: 6,
+        layers: [esriSatellite]
+    });
+
+    // Vector Layers
     const layerPoints = L.geoJSON(geoData.points, {
+        pointToLayer: (feature, latlng) => {
+            const sp = feature.properties.species || feature.properties.name || 'Unknown';
+            const color = speciesColorMap[sp] || '#ffffff';
+            return L.circleMarker(latlng, {
+                radius: 6,
+                fillColor: color,
+                color: '#ffffff',
+                weight: 1.5,
+                opacity: 1,
+                fillOpacity: 0.9
+            });
+        },
         onEachFeature: (f, l) => l.bindPopup(
             `<b>Species:</b> ${f.properties.species || f.properties.name || 'Unknown'}<br/>` +
             `<b>Notes:</b> ${f.properties.notes || 'N/A'}`
         )
     });
 
-    const layerLines = L.geoJSON(geoData.lines, { style: { color: '#e67e22', weight: 3 } });
+    const layerLines = L.geoJSON(geoData.lines, { style: { color: '#f39c12', weight: 3 } });
     const layerPolygons = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.4 } });
-    const layerWorkAreas = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', weight: 2, dashArray: '4', fillOpacity: 0.1 } });
+    const layerWorkAreas = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', weight: 2, dashArray: '4', fillOpacity: 0.15 } });
 
-    // Populate Species Filter Dropdown
-    const speciesSet = new Set();
-    geoData.points.features.forEach(f => {
-        const sp = f.properties.species || f.properties.name;
-        if (sp) speciesSet.add(sp);
-    });
-
+    // Populate Species Filter & Legend UI
     const select = document.getElementById('speciesFilter');
-    Array.from(speciesSet).sort().forEach(sp => {
+    const legendContent = document.getElementById('legendContent');
+
+    Object.keys(speciesColorMap).sort().forEach(sp => {
+        // Filter dropdown
         const opt = document.createElement('option');
         opt.value = sp;
         opt.textContent = sp;
         select.appendChild(opt);
+
+        // Dynamic legend row
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<span class="color-badge" style="background: ${speciesColorMap[sp]};"></span>${sp}`;
+        legendContent.appendChild(item);
     });
 
-    // Container Layer Group for 200m Buffers
+    // Container Layer for 200m Buffers
     const bufferLayerGroup = L.layerGroup().addTo(map);
 
-    // Calculate dynamic 200m buffer polygons using Turf.js
     function updateBufferHeatmap() {
         bufferLayerGroup.clearLayers();
         const selected = document.getElementById('speciesFilter').value;
 
-        // Filter point features based on selected species
         const filteredFeatures = geoData.points.features.filter(f => {
             if (!f.geometry || f.geometry.type !== "Point") return false;
-            const sp = f.properties.species || f.properties.name;
+            const sp = f.properties.species || f.properties.name || 'Unknown';
             return selected === "ALL" || sp === selected;
         });
 
         if (filteredFeatures.length === 0) return;
 
-        // Generate 200-meter buffer polygons around every point
-        const bufferPolygons = filteredFeatures.map(f => {
-            return turf.buffer(f, 0.2, { units: 'kilometers' }); // 0.2 km = 200 meters
-        });
+        // Create 200m buffered polygons per species color
+        filteredFeatures.forEach(f => {
+            const sp = f.properties.species || f.properties.name || 'Unknown';
+            const color = speciesColorMap[sp] || '#f1c40f';
+            const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
 
-        // Render each 200m buffer with semi-transparent blending (creates overlap intensity)
-        const bufferGeoJSON = L.geoJSON(turf.featureCollection(bufferPolygons), {
-            style: {
-                color: '#e67e22',
-                weight: 1,
-                fillColor: '#f1c40f',
-                fillOpacity: 0.25
-            },
-            onEachFeature: (f, l) => l.bindPopup("<b>Zone:</b> 200m Weed Spread Risk Buffer")
-        });
+            const bufGeoJSON = L.geoJSON(buffered, {
+                style: {
+                    color: color,
+                    weight: 1,
+                    fillColor: color,
+                    fillOpacity: 0.25
+                },
+                onEachFeature: (feature, layer) => layer.bindPopup(`<b>Species:</b> ${sp}<br/><b>Zone:</b> 200m Risk Buffer`)
+            });
 
-        bufferLayerGroup.addLayer(bufferGeoJSON);
+            bufferLayerGroup.addLayer(bufGeoJSON);
+        });
     }
 
-    // Initial load
     updateBufferHeatmap();
 
+    // Map Controls Setup
+    const baseMaps = {
+        "Satellite Imagery": esriSatellite,
+        "OpenStreetMap": osmBase
+    };
+
     const overlayMaps = {
-        "200m Species Heatmap Buffer": bufferLayerGroup,
+        "200m Species Buffers": bufferLayerGroup,
         "Weed Points": layerPoints,
         "Weed LineStrings": layerLines,
         "Weed Polygons": layerPolygons,
         "Work Areas": layerWorkAreas
     };
 
-    L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
+    L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
 
     if (geoData.points.features.length > 0) {
         map.fitBounds(layerPoints.getBounds());
