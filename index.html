@@ -1,190 +1,154 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WeedManager NZ Map Dashboard</title>
+    <title>WeedManager NZ Dashboard</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- Leaflet Resources -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <!-- Turf.js for 200m geodesic buffer calculation -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        #map { width: 100vw; height: 100vh; }
+        html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
         
-        /* Position control panel in top-left to avoid blocking right-hand layer box */
-        .control-panel {
-            position: absolute; top: 12px; left: 50px; z-index: 1000;
-            background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 13px; max-width: 260px;
+        /* Custom UI Legend Container docked inside Leaflet Control Framework */
+        .leaflet-custom-control {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 14px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            max-width: 240px;
         }
-        select { margin-top: 6px; width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
-        .legend {
-            margin-top: 10px; font-size: 12px; line-height: 18px; color: #333; max-height: 160px; overflow-y: auto;
-        }
-        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
-        .color-badge {
-            width: 12px; height: 12px; margin-right: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
-        }
+        .leaflet-custom-control select { width: 100%; margin-top: 4px; padding: 4px; }
+        .legend-box { margin-top: 8px; max-height: 140px; overflow-y: auto; line-height: 18px; }
+        .legend-row { display: flex; align-items: center; font-size: 12px; margin-bottom: 3px; }
+        .badge { width: 12px; height: 12px; margin-right: 6px; border-radius: 50%; display: inline-block; }
     </style>
 </head>
 <body>
-
-<div class="control-panel">
-    <label for="speciesFilter"><b>Species Filter:</b></label><br/>
-    <select id="speciesFilter" onchange="updateBufferHeatmap()">
-        <option value="ALL">-- All Species --</option>
-    </select>
-
-    <div class="legend">
-        <b>Species 200m Buffer Key</b>
-        <div id="legendContent"></div>
-    </div>
-</div>
 
 <div id="map"></div>
 
 <script>
     const geoData = {"points": {"type": "FeatureCollection", "features": []}, "lines": {"type": "FeatureCollection", "features": []}, "polygons": {"type": "FeatureCollection", "features": []}, "work_areas": {"type": "FeatureCollection", "features": []}};
 
-    // Color Palette generator
-    const COLOR_PALETTE = [
-        '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c',
-        '#3498db', '#9b59b6', '#fd79a8', '#00cec9', '#6c5ce7'
-    ];
+    // Map Initialization
+    const map = L.map('map', { center: [-41.2865, 174.7762], zoom: 6 });
 
-    const speciesColorMap = {};
-    let colorIndex = 0;
-
-    geoData.points.features.forEach(f => {
-        const sp = f.properties.species || f.properties.name || 'Unknown';
-        if (!speciesColorMap[sp]) {
-            speciesColorMap[sp] = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
-            colorIndex++;
-        }
-    });
-
-    // Tile Basemaps
-    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    // Tile Layers
+    const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri &mdash; WeedManager NZ'
-    });
-
-    const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors | WeedManager NZ'
-    });
-
-    const map = L.map('map', {
-        center: [-41.2865, 174.7762],
-        zoom: 6,
-        layers: [esriSatellite]
-    });
-
-    // Create and automatically display vector layers on the map
-    const layerPoints = L.geoJSON(geoData.points, {
-        pointToLayer: (feature, latlng) => {
-            const sp = feature.properties.species || feature.properties.name || 'Unknown';
-            const color = speciesColorMap[sp] || '#ffffff';
-            return L.circleMarker(latlng, {
-                radius: 6,
-                fillColor: color,
-                color: '#ffffff',
-                weight: 1.5,
-                opacity: 1,
-                fillOpacity: 0.9
-            });
-        },
-        onEachFeature: (f, l) => l.bindPopup(
-            `<b>Species:</b> ${f.properties.species || f.properties.name || 'Unknown'}<br/>` +
-            `<b>Notes:</b> ${f.properties.notes || 'N/A'}`
-        )
     }).addTo(map);
 
-    const layerLines = L.geoJSON(geoData.lines, { style: { color: '#f39c12', weight: 3 } }).addTo(map);
-    const layerPolygons = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.4 } }).addTo(map);
-    const layerWorkAreas = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', weight: 2, dashArray: '4', fillOpacity: 0.15 } }).addTo(map);
-
-    // Populate Species Selection Dropdown & Dynamic Legend
-    const select = document.getElementById('speciesFilter');
-    const legendContent = document.getElementById('legendContent');
-
-    Object.keys(speciesColorMap).sort().forEach(sp => {
-        const opt = document.createElement('option');
-        opt.value = sp;
-        opt.textContent = sp;
-        select.appendChild(opt);
-
-        const item = document.createElement('div');
-        item.className = 'legend-item';
-        item.innerHTML = `<span class="color-badge" style="background: ${speciesColorMap[sp]};"></span>${sp}`;
-        legendContent.appendChild(item);
+    const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
     });
 
-    // Buffer Layer Group
-    const bufferLayerGroup = L.layerGroup().addTo(map);
+    // Color assignment for Species
+    const PALETTE = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6'];
+    const speciesColors = {};
+    let idx = 0;
 
-    function updateBufferHeatmap() {
-        bufferLayerGroup.clearLayers();
-        const selected = document.getElementById('speciesFilter').value;
-
-        if (!geoData.points || !geoData.points.features) return;
-
-        const filteredFeatures = geoData.points.features.filter(f => {
-            if (!f.geometry || f.geometry.type !== "Point") return false;
-            const sp = f.properties.species || f.properties.name || 'Unknown';
-            return selected === "ALL" || sp === selected;
-        });
-
-        if (filteredFeatures.length === 0) return;
-
-        filteredFeatures.forEach(f => {
-            try {
-                const sp = f.properties.species || f.properties.name || 'Unknown';
-                const color = speciesColorMap[sp] || '#f1c40f';
-                const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
-
-                const bufGeoJSON = L.geoJSON(buffered, {
-                    style: {
-                        color: color,
-                        weight: 1,
-                        fillColor: color,
-                        fillOpacity: 0.25
-                    },
-                    onEachFeature: (feature, layer) => layer.bindPopup(`<b>Species:</b> ${sp}<br/><b>Zone:</b> 200m Risk Buffer`)
-                });
-
-                bufferLayerGroup.addLayer(bufGeoJSON);
-            } catch (err) {
-                console.warn("Could not buffer point feature:", f, err);
+    if (geoData.points && geoData.points.features) {
+        geoData.points.features.forEach(f => {
+            const name = f.properties.species || f.properties.name || 'Unspecified';
+            if (!speciesColors[name]) {
+                speciesColors[name] = PALETTE[idx % PALETTE.length];
+                idx++;
             }
         });
     }
 
-    updateBufferHeatmap();
+    // Vector Layers
+    const pointLayer = L.geoJSON(geoData.points, {
+        pointToLayer: (f, latlng) => {
+            const name = f.properties.species || f.properties.name || 'Unspecified';
+            return L.circleMarker(latlng, {
+                radius: 6,
+                fillColor: speciesColors[name] || '#ffffff',
+                color: '#ffffff',
+                weight: 1,
+                fillOpacity: 0.9
+            });
+        },
+        onEachFeature: (f, l) => l.bindPopup(`<b>Species:</b> ${f.properties.species || f.properties.name || 'N/A'}`)
+    }).addTo(map);
 
-    // Map Layer Toggle Controls (Collapsed by default in top-right)
-    const baseMaps = {
-        "Satellite Imagery": esriSatellite,
-        "OpenStreetMap": osmBase
+    const lineLayer = L.geoJSON(geoData.lines, { style: { color: '#f39c12', weight: 3 } }).addTo(map);
+    const polyLayer = L.geoJSON(geoData.polygons, { style: { color: '#e74c3c', fillOpacity: 0.3 } }).addTo(map);
+    const workLayer = L.geoJSON(geoData.work_areas, { style: { color: '#3498db', dashArray: '4', fillOpacity: 0.1 } }).addTo(map);
+
+    const bufferGroup = L.layerGroup().addTo(map);
+
+    function updateBuffers() {
+        bufferGroup.clearLayers();
+        const sel = document.getElementById('spSelect') ? document.getElementById('spSelect').value : 'ALL';
+
+        if (!geoData.points || !geoData.points.features.length) return;
+
+        geoData.points.features.forEach(f => {
+            if (!f.geometry || f.geometry.type !== 'Point') return;
+            const spName = f.properties.species || f.properties.name || 'Unspecified';
+            if (sel !== 'ALL' && spName !== sel) return;
+
+            try {
+                const buffered = turf.buffer(f, 0.2, { units: 'kilometers' });
+                L.geoJSON(buffered, {
+                    style: {
+                        color: speciesColors[spName] || '#f1c40f',
+                        weight: 1,
+                        fillColor: speciesColors[spName] || '#f1c40f',
+                        fillOpacity: 0.25
+                    }
+                }).addTo(bufferGroup);
+            } catch(e) {
+                console.warn('Buffer calculation failed for feature', e);
+            }
+        });
+    }
+
+    // DOCK LEGEND PANEL TO BOTTOM-LEFT
+    const legendControl = L.control({ position: 'bottomleft' });
+    legendControl.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-custom-control');
+        let html = '<b>Species Filter</b><br/><select id="spSelect" onchange="updateBuffers()"><option value="ALL">-- All Species --</option>';
+        
+        Object.keys(speciesColors).sort().forEach(sp => {
+            html += `<option value="${sp}">${sp}</option>`;
+        });
+        html += '</select><div class="legend-box"><b>200m Buffer Key</b><br/>';
+
+        Object.keys(speciesColors).sort().forEach(sp => {
+            html += `<div class="legend-row"><span class="badge" style="background:${speciesColors[sp]}"></span>${sp}</div>`;
+        });
+        html += '</div>';
+
+        div.innerHTML = html;
+        L.DomEvent.disableScrollPropagation(div);
+        L.DomEvent.disableClickPropagation(div);
+        return div;
     };
+    legendControl.addTo(map);
 
-    const overlayMaps = {
-        "200m Species Buffers": bufferLayerGroup,
-        "Weed Points": layerPoints,
-        "Weed LineStrings": layerLines,
-        "Weed Polygons": layerPolygons,
-        "Work Areas": layerWorkAreas
-    };
+    // DOCK LAYER TOGGLE CONTROL TO TOP-RIGHT
+    L.control.layers(
+        { "Satellite Imagery": esriSat, "OpenStreetMap": osmBase },
+        { "200m Buffers": bufferGroup, "Points": pointLayer, "Lines": lineLayer, "Polygons": polyLayer, "Work Areas": workLayer },
+        { collapsed: true, position: 'topright' }
+    ).addTo(map);
 
-    L.control.layers(baseMaps, overlayMaps, { collapsed: true, position: 'topright' }).addTo(map);
+    // Initial buffer draw
+    updateBuffers();
 
-    // Auto-zoom map bounds to fit data
-    const featureBoundsGroup = L.featureGroup([layerPoints, layerLines, layerPolygons, layerWorkAreas]);
-    if (featureBoundsGroup.getBounds().isValid()) {
-        map.fitBounds(featureBoundsGroup.getBounds(), { padding: [30, 30] });
+    // Auto-fit geometry bounds or default to New Zealand region
+    const allBounds = L.featureGroup([pointLayer, lineLayer, polyLayer, workLayer]).getBounds();
+    if (allBounds.isValid()) {
+        map.fitBounds(allBounds, { padding: [20, 20] });
+    } else {
+        map.fitBounds([[-47.0, 166.0], [-34.0, 179.0]]);
     }
 </script>
 </body>
